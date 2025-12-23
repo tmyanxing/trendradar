@@ -1,0 +1,83 @@
+name: TrendRadar WeChat Push
+
+on:
+  schedule:
+    # GitHub Actions 时间基于 UTC，北京时间 = UTC + 8
+    # 当前配置：北京时间 9:00、12:00、18:00 各执行一次
+    # UTC 1:00 = 北京 9:00
+    # UTC 4:00 = 北京 12:00
+    # UTC 10:00 = 北京 18:00
+    - cron: "0 1,4,10 * * *"
+  workflow_dispatch:
+    # 允许手动触发工作流
+
+# 添加权限设置，用于提交更新
+permissions:
+  contents: write
+
+jobs:
+  crawl-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: 'pip'  # 缓存 pip 依赖，加速后续运行
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify required files
+        run: |
+          echo "🔍 检查必需的配置文件..."
+
+          if [ ! -f config/config.yaml ]; then
+            echo "❌ 错误: config/config.yaml 文件不存在"
+            echo "请参考项目文档创建配置文件"
+            exit 1
+          fi
+
+          if [ ! -f config/frequency_words.txt ]; then
+            echo "❌ 错误: config/frequency_words.txt 文件不存在"
+            echo "请参考项目文档创建频率词配置文件"
+            exit 1
+          fi
+
+          echo "✅ 配置文件检查通过"
+
+      - name: Run TrendRadar Crawler
+        env:
+          # 企业微信机器人 Webhook URL（必需）
+          # 请在 GitHub 仓库 Settings -> Secrets and variables -> Actions 中添加
+          WEWORK_WEBHOOK_URL: ${{ secrets.WEIXINROBOT }}
+          # 标记为 GitHub Actions 环境
+          GITHUB_ACTIONS: true
+          # 可选：覆盖配置文件中的设置
+          # ENABLE_CRAWLER: true
+          # ENABLE_NOTIFICATION: true
+          # REPORT_MODE: daily  # 可选: daily | incremental | current
+        run: |
+          echo "🚀 开始运行 TrendRadar 爬虫..."
+          echo "📅 当前时间（北京时间）: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+          python main.py
+
+      - name: Commit and push if changes
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git add -A
+          # 检查是否有变更，有则提交推送
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "📝 没有新的变更需要提交"
+          else
+            git commit -m "🤖 Auto update by TrendRadar at $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+            git push
+            echo "✅ 变更已提交并推送"
+          fi
